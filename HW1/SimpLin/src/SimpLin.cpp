@@ -13,8 +13,7 @@ Rcpp::List SimpLinCpp(arma::vec x, arma::vec y){
   // Standard Errors
   arma::vec resids = y - X * coef;
   double sigma2    = arma::accu(arma::square(resids))/(n-k);
-  double sigma     = std::sqrt(sigma2);
-  arma::vec StdErr = sigma * arma::diagvec(arma::inv(arma::trans(X) * X));
+  arma::vec StdErr = arma::sqrt(sigma2 * arma::diagvec(arma::inv(arma::trans(X) * X)));
   
   // 95% confidence interval
   double quantile  = R::qt(0.975, n-k, 1, 0);
