@@ -3,12 +3,14 @@ library(Rcpp)
 library(devtools)
 
 compileAttributes()
+load_all()
+```
+
+```{r}
+compileAttributes()
 uninstall()
 build()
-install()
-
-compileAttributes()
-load_all()
+install(build_vignettes = TRUE)
 ```
 
 

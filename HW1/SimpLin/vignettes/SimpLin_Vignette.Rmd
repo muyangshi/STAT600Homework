@@ -1,0 +1,55 @@
+---
+title: "SimpLin_Vignette"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{SimpLin_Vignette}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(SimpLin)
+```
+
+The R function, `SimpLinR` is exposed to the user.
+It takes in numeric vectors $\boldsymbol{x}$ and $\boldsymbol{y}$, outputs estimated regression coefficients $\hat{\beta_0}$ and $\hat{\beta_1}$ and their corresponding standard errors and 95% confidence intervals, residuals, and predicted values. 
+
+Example:
+Assuming the data is generated under $$y = x + \epsilon$$ where $$\epsilon \sim N(0,1)$$
+```{r}
+x <- 1:30
+y <- x + rnorm(30)
+slr <- SimpLinR(x,y)
+```
+
+The estimated regression coefficients are, respectively:
+```{r}
+slr$Coefficients
+```
+
+Their corresponding standdard errors are, respectively:
+```{r}
+slr$`Std. Errors`
+```
+
+The 95% confidence intervals are, respectively (with the first row representing $\hat{\beta_0}$ and the second row representing $\hat{\beta_1}$):
+```{r}
+slr$`95% CI`
+```
+
+The residuals can be accessed through:
+```{r}
+slr$Residuals
+```
+
+The predicted values can be accessed with:
+```{r}
+slr$`Predicted Values`
+```
