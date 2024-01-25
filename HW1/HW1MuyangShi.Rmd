@@ -21,7 +21,7 @@ registerDoParallel(numcores - 2)
 
 ## Problem 2
 
-Link to my `.tar.gz` file
+To install my package, please download the `SimpLin_1.0.tar.gz` file, github link here: https://github.com/muyangshi/STAT600Homework/tree/main/HW1.
 
 ## Problem 3
 
