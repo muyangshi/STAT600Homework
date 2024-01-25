@@ -1,0 +1,157 @@
+---
+title: "STAT600 HW1"
+author: "Muyang Shi"
+date: "2024-01-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
+library(SimpLin)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(latex2exp)
+library(gridExtra)
+library(foreach)
+library(doParallel)
+numcores <- detectCores()
+registerDoParallel(numcores - 2)
+```
+
+## Problem 2
+
+Link to my `.tar.gz` file
+
+## Problem 3
+
+### Simulate Dataset
+
+```{r}
+set.seed(1)
+Dataset100 <- foreach(i = 1:100) %do% {
+  x <- rnorm(100)
+  e <- rnorm(100)
+  y <- 1 - x + e
+  list(x = x, y = y)
+}
+```
+
+### Base R `lm()`
+
+```{r}
+# Base lm()
+lm_base <- foreach(i = 1:100) %dopar% {
+  x <- Dataset100[[i]]$x
+  y <- Dataset100[[i]]$y
+  elapsed <- system.time({mod.base <- lm(y~x)})[3]
+  coef <- c(mod.base$coefficients)
+  beta0_ci <- confint(mod.base)[1,]
+  beta1_ci <- confint(mod.base)[2,]
+  yhat <- mod.base$fitted.values
+  resids <- mod.base$residuals
+  list(time=elapsed,coef=coef,beta0_ci=beta0_ci,beta1_ci=beta1_ci,yhat=yhat,resids=resids)
+}
+stopImplicitCluster()
+```
+
+### SimpLinCpp
+
+```{r}
+lm_cpp <- foreach(i = 1:100) %dopar% {
+  x <- Dataset100[[i]]$x
+  y <- Dataset100[[i]]$y
+  elapsed <- system.time({mod.cpp <- SimpLinR(x,y)})[3]
+  coef <- c(mod.cpp$Coefficients)
+  beta0_ci <- mod.cpp$`95% CI`[1,]
+  beta1_ci <- mod.cpp$`95% CI`[2,]
+  yhat <- mod.cpp$`Predicted Values`
+  resids <- mod.cpp$Residuals
+  list(time=elapsed,coef=coef,beta0_ci=beta0_ci,beta1_ci=beta1_ci,yhat=yhat,resids=resids)
+}
+stopImplicitCluster()
+```
+
+## Problem 4
+
+Both the base R `lm()` and the Cpp `SimpLin` produce same result (in terms of bias, coverage probability, mean squared error for the regression coefficients as well as predictive mse for $\hat{y}$) like they should be. 
+Time-wise, the cpp is faster than the base R `lm()`.
+
+A table comparing the two methods' performance is included below, as well as histogram of the estimated coefficients.
+
+```{r, echo = FALSE}
+time.base <- mean(sapply(lm_base,FUN=function(mod){mod$time}))
+time.cpp  <- mean(sapply(lm_cpp,FUN=function(mod){mod$time}))
+
+bias.beta0.base <- mean(sapply(lm_base,FUN=function(mod){mod$coef[1] - 1}))
+bias.beta0.cpp  <- mean(sapply(lm_cpp, FUN=function(mod){mod$coef[1] - 1}))
+
+bias.beta1.base <- mean(sapply(lm_base,FUN=function(mod){mod$coef[2] - (-1)}))
+bias.beta1.cpp  <- mean(sapply(lm_cpp ,FUN=function(mod){mod$coef[2] - (-1)}))
+
+cover.beta0.base <- mean(sapply(lm_base,FUN=function(mod){mod$beta0_ci[1] <= 1 & 1 <= mod$beta0_ci[2]}))
+cover.beta0.cpp  <- mean(sapply(lm_cpp, FUN=function(mod){mod$beta0_ci[1] <= 1 & 1 <= mod$beta0_ci[2]}))
+
+cover.beta1.base <- mean(sapply(lm_base,FUN=function(mod){mod$beta1_ci[1] <= -1 & -1 <= mod$beta1_ci[2]}))
+cover.beta1.cpp  <- mean(sapply(lm_cpp, FUN=function(mod){mod$beta1_ci[1] <= -1 & -1 <= mod$beta1_ci[2]}))
+
+mse.beta0.base <- mean(sapply(lm_base,FUN=function(mod){mod$coef[1] - 1})^2)
+mse.beta0.cpp  <- mean(sapply(lm_cpp, FUN=function(mod){mod$coef[1] - 1})^2)
+
+mse.beta1.base <- mean(sapply(lm_base,FUN=function(mod){mod$coef[2] - (-1)})^2)
+mse.beta1.cpp  <- mean(sapply(lm_cpp, FUN=function(mod){mod$coef[2] - (-1)})^2)
+
+mse.pred.base <- mean(sapply(lm_base,FUN=function(mod){(mod$resids)^2}))
+mse.pred.cpp  <- mean(sapply(lm_cpp, FUN=function(mod){(mod$resids)^2}))
+
+rbind(c(time.base, time.cpp), 
+      c(bias.beta0.base,bias.beta0.cpp),
+      c(bias.beta1.base,bias.beta1.cpp), 
+      c(cover.beta0.base,cover.beta0.cpp),
+      c(cover.beta1.base,cover.beta1.cpp), 
+      c(mse.beta0.base,mse.beta0.cpp), 
+      c(mse.beta1.base,mse.beta1.cpp), 
+      c(mse.pred.base,mse.pred.cpp)) %>%
+  data.frame() %>%
+  `rownames<-`(c("Avg Time (secs)", 
+                 "Bias: b0", 
+                 "Bias: b1",
+                 "Empirical Coverage: b0", 
+                 "Empirical Coverage: b1",
+                 "MSE: b0", 
+                 "MSE: b1", 
+                 "Prediction MSE")) %>%
+  kable(col.names = c("Base R", "Rcpp"),
+        caption = "Performace Comparison between Base R and Rcpp")
+```
+
+```{r, echo = FALSE, out.height='40%', fig.align='center'}
+hist.b0.base <- ggplot(data.frame(beta0=sapply(lm_base,FUN=function(mod){mod$coef[1]}))) +
+  geom_histogram(aes(x=beta0, y = after_stat(density)),bins=10) +
+  theme_bw() +
+  labs(x = TeX("$\\hat{\\beta}_{0}$"), 
+       y = 'density',
+       title = 'Base R Beta0 Estimates')
+hist.b0.cpp <- ggplot(data.frame(beta0=sapply(lm_cpp,FUN=function(mod){mod$coef[1]}))) +
+  geom_histogram(aes(x=beta0, y = after_stat(density)),bins=10) +
+  theme_bw() +
+  labs(x = TeX("$\\hat{\\beta}_{0}$"), 
+       y = 'density',
+       title = 'Rcpp Beta0 Estimates')
+grid.arrange(hist.b0.base,hist.b0.cpp, nrow=1)
+
+hist.b1.base <- ggplot(data.frame(beta1=sapply(lm_base,FUN=function(mod){mod$coef[2]}))) +
+  geom_histogram(aes(x=beta1, y = after_stat(density)),bins=10) +
+  theme_bw() +
+  labs(x = TeX("$\\hat{\\beta}_{1}$"), 
+       y = 'density',
+       title = 'Base R Beta1 Estimates')
+hist.b1.cpp <- ggplot(data.frame(beta1=sapply(lm_cpp,FUN=function(mod){mod$coef[2]}))) +
+  geom_histogram(aes(x=beta1, y = after_stat(density)),bins=10) +
+  theme_bw() +
+  labs(x = TeX("$\\hat{\\beta}_{1}$"), 
+       y = 'density',
+       title = 'Rcpp Beta1 Estimates')
+grid.arrange(hist.b1.base,hist.b1.cpp, nrow=1)
+
+```
