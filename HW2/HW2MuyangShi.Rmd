@@ -161,13 +161,17 @@ Bisection_theta_hat2
 
 From the course slides, we know that Newton's method has quadratic convergence order $\beta = 2$, i.e. $$\lim_{t\rightarrow \infty} \dfrac{|\epsilon^{(t+1)}|}{|\epsilon^{(t)}|^2} = c$$
 
-As for the Secant method, from the textbook equation 2.27, we have that as $t \rightarrow \infty$
+As for the *1-step* Secant method, from the textbook equation 2.27, we have that as $t \rightarrow \infty$
 $$\epsilon^{(t+1)} \approx d^{(t)}\epsilon^{(t)}\epsilon^{(t-1)}$$, where $$d^{(t)} \rightarrow \dfrac{g'''(x^*)}{2g''(x^*)} = d$$
 Next, to find the $\beta$ such that $$\lim_{t\rightarrow \infty}\dfrac{|\epsilon^{(t+1)}|}{|\epsilon^{(t)}|^\beta} = c$$
 we use this relationship to replace $\epsilon^{(t-1)}$ and $\epsilon^{(t+1)}$ in the equation above, we will get as $t \rightarrow \infty$, $$c |\epsilon^{(t)}|^\beta = d |\epsilon^{(t)}| \dfrac{|\epsilon^{(t)}|}{c}^{1/\beta}$$ with rearrangement we have $$\lim_{t \rightarrow \infty} |\epsilon^{(t)}|^{1-\beta+1/\beta} = \dfrac{c^{1+1/\beta}}{d} = c^*$$ where $c^*$ is just some constant, i.e. $1-\beta + 1/\beta = 0$.
-Finally, solving for $\beta$ yields $$\beta = (1 + \sqrt{5})/2 \approx 1.62 < 2$$.
+Then, solving for $\beta$ yields $$\beta = (1 + \sqrt{5})/2 \approx 1.62$$.
+Call the convergence rate for the *1-step* Secant method $\beta_1$, we have $\beta_1 < 2$. Hence, the Newton's method enjoys a faster convergence rate than the *1-step* Secant method.
 
-Hence, the Newton's method enjoys a faster convergence rate than the Secant method.
+Similarly, we can derive the convergence rate for the **2-step** Secant method, i.e. we need to find the $\beta_2$ such that $$\lim_{t\rightarrow \infty} \dfrac{|\epsilon^{(t+2)}|}{|\epsilon^{(t)}|^{\beta_2}} = c_2$$
+Using equation (2.27) from the textbook again, we want to solve for $\beta_2$ in $$\lim_{t\rightarrow \infty} \dfrac{|d^{(t+1)} \epsilon^{(t+1)} \epsilon^{(t)}|}{|\epsilon^{(t)}|^{\beta_2}} = c_2$$
+And as with before, 1. using the relation that $$\lim_{t\rightarrow \infty}d^{(t+1)} \rightarrow \dfrac{g'''(x^*)}{2g''(x^*)} = d$$ and 2. using the *1-step* Secant convergence rate we have $$\lim_{t\rightarrow \infty} |\epsilon^{(t+1)}| = c_1 |\epsilon^{t}|^{\beta_1}$$, we can re-write the convergence rate equation for the **2-step** Secant method as $$\lim_{t\rightarrow \infty} \dfrac{dc_1|\epsilon^{(t)}|^{\beta_1}|\epsilon^{(t)}|}{|\epsilon^t|^{\beta_2}} = c_2$$, i.e., $$\lim_{t\rightarrow \infty} |\epsilon^{(t)}|^{\beta_1 + 1 - \beta_2} = \dfrac{c_2}{c_1}d = c^* \text{ (some constant)}$$
+Thus, $$\beta_2 = 1 + \beta_1 \approx 1 + 1.62 > 2$$, the **2-step** Secant method enjoys a faster convergence rate than the Newton's method.
 
 ## Problem 3
 
