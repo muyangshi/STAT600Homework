@@ -1,0 +1,79 @@
+---
+title: "HW3MuyangShi"
+author: "Muyang Shi"
+date: "2024-02-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Rcpp)
+library(RcppArmadillo)
+library(dplyr)
+library(knitr)
+library(gridExtra)
+library(latex2exp)
+library(ggplot2)
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+sourceCpp('EM.cpp')
+```
+
+Note: the cpp source code to this document can be found on my Github, listed as `EM.cpp`, [\textcolor{blue}{here}](https://github.com/muyangshi/STAT600Homework/tree/main/HW3).
+
+## Problem 1
+
+### (a)
+
+Define $Q(\theta | \theta^{(t)})$ to be the expectation of the joint log likelihood for the complete data $X = (Y, \Delta)$, conditioned on the observed data $Y = y$, 
+\begin{align*}
+Q(\theta | \theta^{(t)}) &= \mathbb{E} \left\{ \log L(\theta | X) | y, \theta^{(t)} \right\} \\
+&= \mathbb{E} \left\{ \log f_X(x | \theta) | y, \theta^{(t)} \right\} \\
+&= \int \left[\log f_X(x | \theta) \right] f_{\delta | y} ( \delta | y, \theta^{(t)}) d\delta \\
+(\star) &= (1-p)\mu\exp(-\mu y) \cdot \dfrac{(1-p) \mu \exp(-\mu y)}{p\lambda\exp(-\lambda y) + (1-p) \mu \exp(-\mu y)} \\
+& + p\lambda \exp(-\lambda y) \cdot \dfrac{p\lambda\exp(-\lambda y)}{p\lambda\exp(-\lambda y) + (1-p) \mu \exp(-\mu y)}
+\end{align*}
+
+So for the E-step we just compute $(\star)$.
+
+### (b)
+
+We maximize $Q(\theta | \theta^{(t)})$ with respect to $\theta = (p, \lambda, \mu)$; so, differentiating with respect to $p, \lambda, \mu$ yields:
+\begin{align*}
+\dfrac{dQ(\theta | \theta^{(t)})}{dp} &= -\mu \exp(\mu y) \cdot \dfrac{(1-p)\mu \exp(-\mu y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
+  &+ (1-p) \mu \exp(-\mu y) \\
+  &\cdot \dfrac{-\mu \exp(-\mu y) \cdot [p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)] - (1-p)\mu\exp(-\mu y)[\lambda \exp(-\mu y) - \mu \exp(-\mu y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2} \\
+  &+ \lambda \exp(-\lambda y) \cdot \dfrac{p \lambda \exp(-\lambda y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
+  &+ p \lambda \exp(-\lambda y) \cdot \dfrac{\lambda \exp(-\lambda y) \cdot [p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)] - p\lambda \exp(-\lambda y)[\lambda \exp(\lambda y) - \mu \exp(-\mu y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2}
+\end{align*}
+
+\begin{align*}
+\dfrac{dQ(\theta | \theta^{(t)})}{d\lambda} &= (1-p)\mu\exp(-\mu y) \cdot \dfrac{-(1-p)\mu\exp(-\mu y)[p\exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2} \\
+&+ \left[p \exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)\right] \cdot \dfrac{p\lambda \exp(-\lambda y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
+&+ p\lambda \exp(-\lambda y) \cdot \\
+&\left( \dfrac{[p\exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)] [p \lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2} \right. \\
+&- \left. \dfrac{p\lambda \exp(-\lambda y)[p \exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2}\right)
+\end{align*}
+
+\begin{align*}
+\dfrac{dQ(\theta | \theta^{(t)})}{d\mu} &= [(1-p)\exp(-\mu y) + (1-p)\mu\exp(-\mu y)(-y)] \cdot \dfrac{(1-p)\mu \exp(-\mu y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
+&+ (1-p)\mu \exp(-\mu y) \cdot \\
+&\left( \dfrac{[(1-p) \exp(-\mu y) + (1-p)\mu \exp(-\mu y)(-y)] [p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)] }{[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]^2} \right. \\
+&- \left. \dfrac{(1-p)\mu \exp(-\mu y)[(1-p)\exp(-\mu y) + (1-p)\mu \exp(-\mu y) (-y)]}{[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]^2} \right) \\
+&+ p\lambda \exp(-\lambda y) \cdot \dfrac{-p\lambda \exp(-\lambda y)[(1-p)\exp(-\mu y) + (1-p)\mu \exp(-\mu y)(-y)]}{[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]^2}
+\end{align*}
+
+Setting these derivatives equal to zero and solving for $\hat{p}, \hat{\mu}, \hat{\lambda}$ completes the M step; we set $\theta^{(t+1)}$ to be these $\hat{p}, \hat{\mu}, \hat{\lambda}$.
+
+(Note: to perform the EM, we'd now be returning to the E-step, unless a stopping criteria, e.g. $||\theta^{(t+1)} - \theta^{(t)} ||_2 < \epsilon$, has been met.
+
+## Problem 2
+
+
+
+## Problem 3
+
+## Problem 4
+
+## Problem 5
+
+## Problem 6
