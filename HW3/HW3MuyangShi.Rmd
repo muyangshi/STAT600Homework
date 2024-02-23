@@ -14,23 +14,26 @@ library(knitr)
 library(gridExtra)
 library(latex2exp)
 library(ggplot2)
+library(foreach)
+library(doParallel)
+numcores <- detectCores()
+registerDoParallel(numcores - 2)
 setwd(dirname(rstudioapi::getSourceEditorContext()$path))
 sourceCpp('EM.cpp')
 ```
 
-Note: the cpp source code to this document can be found on my Github, listed as `EM.cpp`, [\textcolor{blue}{here}](https://github.com/muyangshi/STAT600Homework/tree/main/HW3).
 
 ## Problem 1
 
 ### (a)
 
-Define $Q(\theta | \theta^{(t)})$ to be the expectation of the joint log likelihood for the complete data $X = (Y, \Delta)$, conditioned on the observed data $Y = y$, 
+Define $Q(\theta | \theta^{(t)})$ to be the expectation of the joint log likelihood for the complete data $X = (Y, \Delta)$, conditioned on the observed data $\boldsymbol{Y} = \boldsymbol{y}$, 
 \begin{align*}
-Q(\theta | \theta^{(t)}) &= \mathbb{E} \left\{ \log L(\theta | X) | y, \theta^{(t)} \right\} \\
-&= \mathbb{E} \left\{ \log f_X(x | \theta) | y, \theta^{(t)} \right\} \\
-&= \int \left[\log f_X(x | \theta) \right] f_{\delta | y} ( \delta | y, \theta^{(t)}) d\delta \\
-(\star) &= (1-p)\mu\exp(-\mu y) \cdot \dfrac{(1-p) \mu \exp(-\mu y)}{p\lambda\exp(-\lambda y) + (1-p) \mu \exp(-\mu y)} \\
-& + p\lambda \exp(-\lambda y) \cdot \dfrac{p\lambda\exp(-\lambda y)}{p\lambda\exp(-\lambda y) + (1-p) \mu \exp(-\mu y)}
+Q(\theta | \theta^{(t)}) &= \mathbb{E} \left\{ \log L(\theta | X) | y_i, \theta^{(t)} \right\} \\
+&= \mathbb{E} \left\{ \log f_X(x | \theta) | y_i, \theta^{(t)} \right\} \\
+&= \int \left[\log f_X(x | \theta) \right] f_{\delta | y_i} ( \delta | y_i, \theta^{(t)}) d\delta \\
+(\star) &= \sum_{i=1}^n \left( \log\left((1-p)\mu\exp(-\mu y_i)\right) \cdot \dfrac{(1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)} \right. \\
+&+ \left. \log\left(p\lambda \exp(-\lambda y_i)\right) \cdot \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)} \right)
 \end{align*}
 
 So for the E-step we just compute $(\star)$.
@@ -39,41 +42,144 @@ So for the E-step we just compute $(\star)$.
 
 We maximize $Q(\theta | \theta^{(t)})$ with respect to $\theta = (p, \lambda, \mu)$; so, differentiating with respect to $p, \lambda, \mu$ yields:
 \begin{align*}
-\dfrac{dQ(\theta | \theta^{(t)})}{dp} &= -\mu \exp(\mu y) \cdot \dfrac{(1-p)\mu \exp(-\mu y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
-  &+ (1-p) \mu \exp(-\mu y) \\
-  &\cdot \dfrac{-\mu \exp(-\mu y) \cdot [p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)] - (1-p)\mu\exp(-\mu y)[\lambda \exp(-\mu y) - \mu \exp(-\mu y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2} \\
-  &+ \lambda \exp(-\lambda y) \cdot \dfrac{p \lambda \exp(-\lambda y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
-  &+ p \lambda \exp(-\lambda y) \cdot \dfrac{\lambda \exp(-\lambda y) \cdot [p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)] - p\lambda \exp(-\lambda y)[\lambda \exp(\lambda y) - \mu \exp(-\mu y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2}
+\dfrac{dQ(\theta | \theta^{(t)})}{dp} &= \sum_{i=1}^n \left(
+- \dfrac{1}{1-p} \cdot \dfrac{(1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)} \right. \\
+&+ \left. \dfrac{1}{p} \cdot \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)} \right) \\
+\dfrac{dQ(\theta | \theta^{(t)})}{d\lambda} &= \sum_{i=1}^n
+\left[\dfrac{1}{\lambda} - y_i \right] \cdot \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)} \\
+\dfrac{dQ(\theta | \theta^{(t)})}{d\mu} &= \sum_{i=1}^n
+\left[\dfrac{1}{\mu} - y_i \right] \cdot \dfrac{(1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}
 \end{align*}
+
+Setting these derivatives equal to zero and solving for $\hat{p}, \hat{\mu}, \hat{\lambda}$ completes the M step; we set $\theta^{(t+1)}$ to be these $\hat{p}, \hat{\mu}, \hat{\lambda}$, where 
 
 \begin{align*}
-\dfrac{dQ(\theta | \theta^{(t)})}{d\lambda} &= (1-p)\mu\exp(-\mu y) \cdot \dfrac{-(1-p)\mu\exp(-\mu y)[p\exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2} \\
-&+ \left[p \exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)\right] \cdot \dfrac{p\lambda \exp(-\lambda y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
-&+ p\lambda \exp(-\lambda y) \cdot \\
-&\left( \dfrac{[p\exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)] [p \lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2} \right. \\
-&- \left. \dfrac{p\lambda \exp(-\lambda y)[p \exp(-\lambda y) + p\lambda \exp(-\lambda y)(-y)]}{\left[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)\right]^2}\right)
+\hat{p} &= \dfrac{1}{n} \sum_{i=1}^n \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)} \\
+\hat{\lambda} &= \dfrac{\sum_{i=1}^n \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}}{\sum_{i=1}^n y_i \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}} \\
+\hat{\mu} &= \dfrac{n - \sum_{i=1}^n \dfrac{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}}{\sum_{i=1}^n y_i \dfrac{(1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}{p^{(t)}\lambda^{(t)}\exp(-\lambda^{(t)} y_i) + (1-p^{(t)}) \mu^{(t)} \exp(-\mu^{(t)} y_i)}}
 \end{align*}
-
-\begin{align*}
-\dfrac{dQ(\theta | \theta^{(t)})}{d\mu} &= [(1-p)\exp(-\mu y) + (1-p)\mu\exp(-\mu y)(-y)] \cdot \dfrac{(1-p)\mu \exp(-\mu y)}{p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)} \\
-&+ (1-p)\mu \exp(-\mu y) \cdot \\
-&\left( \dfrac{[(1-p) \exp(-\mu y) + (1-p)\mu \exp(-\mu y)(-y)] [p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)] }{[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]^2} \right. \\
-&- \left. \dfrac{(1-p)\mu \exp(-\mu y)[(1-p)\exp(-\mu y) + (1-p)\mu \exp(-\mu y) (-y)]}{[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]^2} \right) \\
-&+ p\lambda \exp(-\lambda y) \cdot \dfrac{-p\lambda \exp(-\lambda y)[(1-p)\exp(-\mu y) + (1-p)\mu \exp(-\mu y)(-y)]}{[p\lambda \exp(-\lambda y) + (1-p)\mu\exp(-\mu y)]^2}
-\end{align*}
-
-Setting these derivatives equal to zero and solving for $\hat{p}, \hat{\mu}, \hat{\lambda}$ completes the M step; we set $\theta^{(t+1)}$ to be these $\hat{p}, \hat{\mu}, \hat{\lambda}$.
 
 (Note: to perform the EM, we'd now be returning to the E-step, unless a stopping criteria, e.g. $||\theta^{(t+1)} - \theta^{(t)} ||_2 < \epsilon$, has been met.
 
 ## Problem 2
 
-
+Note: the cpp source code to this document can be found on my Github, listed as `EM.cpp`, [\textcolor{blue}{here}](https://github.com/muyangshi/STAT600Homework/tree/main/HW3).
 
 ## Problem 3
 
+Dataset is simulated as such:
+
+```{r}
+set.seed(600)
+n <- 100
+p <- 0.25
+lambda <- 1
+mu <- 2
+
+data100 <- foreach(i = 1:100) %do% {
+  rates <- sample(c(lambda,mu), n, replace = TRUE, prob = c(p, 1-p))
+  Y <- sapply(rates, rexp, n = 1)
+  Y
+}
+```
+
 ## Problem 4
+
+Parameters are estimated in parallel:
+
+```{r}
+theta100 <- foreach(i = 1:100) %dopar% {
+  result <- EM(data100[[i]], c(0.25, 1, 2), eps=1e-8)
+  list(p = result$theta[1,], 
+       lambda = result$theta[2,], 
+       mu = result$theta[3,])
+}
+stopImplicitCluster()
+```
 
 ## Problem 5
 
+We estimate the standard errors of the parameter estimates using bootstrap method:
+
+```{r}
+set.seed(600)
+bootstrap <- function(Y){
+  n.boot <- 100
+  theta.boot <- matrix(NA, nrow = n.boot, ncol = 3)
+  theta.boot[1,] <- t(EM(Y, c(0.25, 1, 2), eps=1e-8)$theta)
+  for(j in 2:n.boot){
+    Y.boot <- sample(Y, 100, replace = TRUE)
+    theta.boot[j,] <- t(EM(Y.boot, c(0.25, 1, 2), eps=1e-8)$theta)
+  }
+  var.p <- var(theta.boot[,1])
+  var.lambda <- var(theta.boot[,2])
+  var.mu <- var(theta.boot[,3])
+  return(c(var.p, var.lambda, var.mu))
+}
+var.boot <- foreach(i = 1:100) %dopar% {
+  bootstrap(data100[[i]])
+}
+stopImplicitCluster()
+```
+
 ## Problem 6
+
+Below are three histograms showing the estimated parameters $p, \lambda, \mu$ from 100 data sets each of size 100:
+
+```{r, fig.align='center',out.width='30%', echo = FALSE, fig.show='hold'}
+hist(sapply(theta100,FUN=function(theta){theta$p}), 
+     freq = FALSE,
+     main = 'histogram of p estimates',
+     xlab = 'p')
+abline(v = 0.25, col = 'blue')
+hist(sapply(theta100,FUN=function(theta){theta$lambda}), 
+     freq = FALSE,
+     main = 'histogram of lambda estimates',
+     xlab = 'lambda')
+abline(v = 1, col = 'blue')
+hist(sapply(theta100,FUN=function(theta){theta$mu}), 
+     freq = FALSE,
+     main = 'histogram of mu estimates',
+     xlab = 'mu')
+abline(v = 2, col = 'blue')
+```
+
+The performance for each of the parameters in the model is summarized in the table below:
+
+```{r, echo = FALSE}
+mean.p <- mean(sapply(theta100,FUN=function(theta){theta$p}))
+mean.lambda <- mean(sapply(theta100,FUN=function(theta){theta$lambda}))
+mean.mu <- mean(sapply(theta100,FUN=function(theta){theta$mu}))
+
+bias.p <- mean.p - 0.25
+bias.lambda <- mean.lambda - 1
+bias.mu <- mean.mu - 2
+
+var.p <- sapply(var.boot, FUN=function(dat){dat[1]})
+var.lambda <- sapply(var.boot, FUN=function(dat){dat[2]})
+var.mu <- sapply(var.boot, FUN=function(dat){dat[3]})
+se.p <- sqrt(mean(var.p))
+se.lambda <- sqrt(mean(var.lambda))
+se.mu <- sqrt(mean(var.mu))
+
+lb.p <- sapply(theta100,FUN=function(theta){theta$p}) - qt(0.975, 99) * se.p
+ub.p <- sapply(theta100,FUN=function(theta){theta$p}) + qt(0.975, 99) * se.p
+cover.p <- mean(lb.p < 0.25 & ub.p > 0.25)
+
+lb.lambda <- sapply(theta100,FUN=function(theta){theta$lambda}) - qt(0.975, 99) * se.lambda
+ub.lambda <- sapply(theta100,FUN=function(theta){theta$lambda}) + qt(0.975, 99) * se.lambda
+cover.lambda <- mean(lb.lambda < 1 & ub.lambda > 1)
+
+lb.mu <- sapply(theta100,FUN=function(theta){theta$mu}) - qt(0.975, 99) * se.mu
+ub.mu <- sapply(theta100,FUN=function(theta){theta$mu}) + qt(0.975, 99) * se.mu
+cover.mu <- mean(lb.mu < 2 & ub.mu > 2)
+
+
+rbind(c(0.25, round(mean.p,3), round(bias.p,3), round(se.p,3), round(cover.p,3)),
+      c(1, round(mean.lambda,3), round(bias.lambda,3), round(se.lambda,3), round(cover.lambda,3)),
+      c(2, round(mean.mu,3), round(bias.mu,3), round(se.mu,3), round(cover.mu,3))) %>%
+  data.frame() %>%
+  `rownames<-`(c("p", "lambda", "mu")) %>%
+  kable(col.names = c("true value", "average estimates", "bias", "standard errors", "coverage probability"),
+        caption = "Performance of each of the parameters estimation")
+```
