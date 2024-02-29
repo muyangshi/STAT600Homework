@@ -39,10 +39,11 @@ double lambda_hat(arma::vec Y, double p, double lambda, double mu){
   return arma::accu(p_delta(Y, 1, p, lambda, mu))/arma::accu(Y % p_delta(Y, 1, p, lambda, mu));
 }
 
+
 // [[Rcpp::export]]
 double mu_hat(arma::vec Y, double p, double lambda, double mu){
-  double n = Y.n_elem;
-  return (n - arma::accu(p_delta(Y, 1, p, lambda, mu)))/(arma::accu(Y % p_delta(Y, 0, p, lambda, mu)));
+  // double n = Y.n_elem;
+  return arma::accu(p_delta(Y, 0, p, lambda, mu))/(arma::accu(Y % p_delta(Y, 0, p, lambda, mu)));
 }
 
 // [[Rcpp::export]]
@@ -76,6 +77,34 @@ Rcpp::List EM(arma::vec Y, arma::vec theta, double eps=1e-4){
 
     iter += 1;
   }
+  
+  Rcpp::List results;
+  results["theta"] = theta_new;
+  return results;
+}
+
+// [[Rcpp::export]]
+Rcpp::List EM2(arma::vec Y, arma::vec theta, double eps=1e-4){
+  int iter = 1;
+  double p = theta[0];
+  double lambda = theta[1];
+  double mu = theta[2];
+  
+  while(iter < 200){
+
+    
+    p      = p_hat(Y, p, lambda, mu);
+    lambda = lambda_hat(Y, p, lambda, mu);
+    mu     = mu_hat(Y, p, lambda, mu);
+    
+    
+    iter += 1;
+  }
+  
+  arma::vec theta_new = arma::vec(3);
+  theta_new[0] = p;
+  theta_new[1] = lambda;
+  theta_new[2] = mu;
   
   Rcpp::List results;
   results["theta"] = theta_new;
