@@ -1,0 +1,280 @@
+---
+title: "HW4MuyangShi"
+author: "Muyang Shi"
+date: "2024-02-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', out.width = '60%')
+library(Rcpp)
+library(RcppArmadillo)
+library(dplyr)
+library(knitr)
+library(gridExtra)
+library(latex2exp)
+library(ggplot2)
+library(foreach)
+library(doParallel)
+numcores <- detectCores()
+registerDoParallel(numcores - 2)
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+sourceCpp('MonteCarlo.cpp')
+```
+
+Note: the cpp source code to this document can be found on my Github, listed as `MonteCarlo.cpp`, [\textcolor{blue}{here}](https://github.com/muyangshi/STAT600Homework/tree/main/HW4).
+
+## Problem 1
+
+### (a) importance sampling with standardized weights
+
+Use $f(x)$ to denote the actual density of $X$ which we pretend we don't know, but we do knot that $f(x) = c q(x)$ where $c$ is a constant; use $\phi(x)$ to denote an importance sampling function.
+
+Note that 
+\begin{align*}
+  \sigma^2 &= \dfrac{\int x^2 \frac{f(x)}{q(x)} \frac{q(x)}{\phi(x)} \phi(x) dx}{\int \frac{f(x)}{q(x)} \frac{q(x)}{\phi(x)} \phi(x) dx} \\
+  &= \dfrac{\int x^2 \alpha \frac{q(x)}{\phi(x)} \phi(x) dx}{\int \alpha \frac{q(x)}{\phi(x)} \phi(x) dx} \\
+  &= \dfrac{\int x^2 \frac{q(x)}{\phi(x)} \phi(x) dx}{\int \frac{q(x)}{\phi(x)} \phi(x) dx}
+\end{align*}
+which means drawing $X_1, ..., X_n \stackrel{iid}\sim \phi(x)$ and using the estimator
+$$\hat{\sigma}^2 = \sum_{i=1}^n X_i^2 w(X_i)$$
+where 
+$$w(X_i) = \dfrac{w^*(X_i)}{\sum_{i=1}^n w^*(X_i)} \text{ with } w^*(X_i) = \dfrac{q(X_i)}{\phi(X_i)}$$
+
+By plotting $q(x)$ and $e(x) = 3 \cdot \phi(x)$, where $\phi(x)$ is the probability density function of the standard Normal distribution, we can see that $e(x)$ can serve as an envelope (so we use $\phi(x)$ as our importance sampling function).
+
+```{r, echo = FALSE, fig.align = 'center', out.width='60%'}
+xs <- seq(-4,4, length.out = 200)
+plot(xs, 3*dnorm(xs), type = 'l', col = 'blue')
+lines(xs, qx_vec(xs))
+legend(-4, 1.2, legend=c("3*Normal", "q(x)"),
+       col=c("blue", "black"), lty=1, cex=0.8)
+```
+
+With $n = 10,000$ draws from the envelope $e(x)$, we estimated $\sigma^2$ to be 0.780.
+
+```{r, results='hide'}
+set.seed(600)
+x <- Rcpp_rnorm(10000); # draw from envelope Normal
+x.q <- qx_vec(x) # corresponding q(x)
+x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+sum.w_star <- sum(x.w_star)
+x.w <- x.w_star/sum.w_star # standardized weights
+
+sum((x^2)*x.w) # estimate
+```
+
+### (b) rejection sampling
+
+Note that from page 156 of the textbook, rejection sampling can still be applied when $f$ is only known up to a proportionality constant $c$; we still use $e(x) = 3 \cdot \phi(x)$ as envelope and a draw $Y = y$ is rejected when $U > q(y)/e(y)$; the sampling probability remains correct because the unknown constant $c$ cancels out.
+
+Using rejection sampling, we got an estimation of $\hat{\sigma}^2 = 0.770$, with $n = 10,000$ (number of accepted samples).
+
+```{r, results='hide'}
+set.seed(601)
+rs <- rejection_sampling(10000)
+mean(rs**2)
+```
+
+### (c) sampling importance resampling
+
+As with part (a), we still use $\phi(x)$ as our importance sampling function. Using sampling importance resampling, we got an estimation of $\hat{\sigma}^2 = 0.793$ with $n = 10,000$.
+
+```{r, results='hide'}
+set.seed(602)
+x <- Rcpp_rnorm(10000); # draw from IS Normal
+x.q <- qx_vec(x) # corresponding q(x)
+x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+sum.w_star <- sum(x.w_star)
+x.w <- x.w_star/sum.w_star # standardized weights
+
+x.sir <- sample(c(x), size = 10000, replace = TRUE, prob = c(x.w))
+mean(x.sir^2) # estimate
+```
+
+### (d)
+
+Using the samples from part (b) (the 10,000 rejecting sampling samples), the Philippe and Robert estimate is $\hat{\sigma}^2 = 0.777$.
+
+```{r, results = 'hide'}
+x <- sort(c(rs))
+PhilippeRobert(x)
+```
+
+### (e)
+
+We generate 1000 estimates with each method, while also varying the number of sample taken with $n = 100, 1000, 10000$. We then compare the averages of the estimators and the variance of the estimators.
+
+```{r, echo = FALSE}
+set.seed(600)
+# importance sampling
+is.100 <- foreach(i = 1:1000) %dopar% {
+  x <- Rcpp_rnorm(100); # draw from envelope Normal
+  x.q <- qx_vec(x) # corresponding q(x)
+  x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+  x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+  sum.w_star <- sum(x.w_star)
+  x.w <- x.w_star/sum.w_star # standardized weights
+  sum((x^2)*x.w) # estimate
+}
+is.1000 <- foreach(i = 1:1000) %dopar% {
+  x <- Rcpp_rnorm(1000); # draw from envelope Normal
+  x.q <- qx_vec(x) # corresponding q(x)
+  x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+  x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+  sum.w_star <- sum(x.w_star)
+  x.w <- x.w_star/sum.w_star # standardized weights
+  sum((x^2)*x.w) # estimate
+}
+is.10000 <- foreach(i = 1:1000) %dopar% {
+  x <- Rcpp_rnorm(10000); # draw from envelope Normal
+  x.q <- qx_vec(x) # corresponding q(x)
+  x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+  x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+  sum.w_star <- sum(x.w_star)
+  x.w <- x.w_star/sum.w_star # standardized weights
+  sum((x^2)*x.w) # estimate
+}
+# rejection sampling
+rs.100 <- foreach(i = 1:1000) %dopar% {
+  rs <- rejection_sampling(100)
+  mean(rs**2)
+}
+rs.1000 <- foreach(i = 1:1000) %dopar% {
+  rs <- rejection_sampling(1000)
+  mean(rs**2)
+}
+rs.10000 <- foreach(i = 1:1000) %dopar% {
+  rs <- rejection_sampling(10000)
+  mean(rs**2)
+}
+# sampling importance resampling
+sir.100 <- foreach(i = 1:1000) %dopar% {
+  x <- Rcpp_rnorm(100); # draw from IS Normal
+  x.q <- qx_vec(x) # corresponding q(x)
+  x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+  x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+  sum.w_star <- sum(x.w_star)
+  x.w <- x.w_star/sum.w_star # standardized weights
+  x.sir <- sample(c(x), size = 100, replace = TRUE, prob = c(x.w))
+  mean(x.sir^2) # estimate
+}
+sir.1000 <- foreach(i = 1:1000) %dopar% {
+  x <- Rcpp_rnorm(1000); # draw from IS Normal
+  x.q <- qx_vec(x) # corresponding q(x)
+  x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+  x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+  sum.w_star <- sum(x.w_star)
+  x.w <- x.w_star/sum.w_star # standardized weights
+  x.sir <- sample(c(x), size = 1000, replace = TRUE, prob = c(x.w))
+  mean(x.sir^2) # estimate
+}
+sir.10000 <- foreach(i = 1:1000) %dopar% {
+  x <- Rcpp_rnorm(10000); # draw from IS Normal
+  x.q <- qx_vec(x) # corresponding q(x)
+  x.phi <- Rcpp_dnorm(x) # corresponding phi(x)
+  x.w_star <- w_star(x.q, x.phi) # unstandardized weights
+  sum.w_star <- sum(x.w_star)
+  x.w <- x.w_star/sum.w_star # standardized weights
+  x.sir <- sample(c(x), size = 10000, replace = TRUE, prob = c(x.w))
+  mean(x.sir^2) # estimate
+}
+# Philippe Robert
+pr.100 <- foreach(i = 1:1000) %dopar% {
+  rs <- rejection_sampling(100)
+  x <- sort(c(rs))
+  PhilippeRobert(x)
+}
+pr.1000 <- foreach(i = 1:1000) %dopar% {
+  rs <- rejection_sampling(1000)
+  x <- sort(c(rs))
+  PhilippeRobert(x)
+}
+pr.10000 <- foreach(i = 1:1000) %dopar% {
+  rs <- rejection_sampling(10000)
+  x <- sort(c(rs))
+  PhilippeRobert(x)
+}
+
+```
+
+Below are the histograms showing the estimates from the four methods across the three different sample sizes:
+
+- Histograms of **Importance Sampling** estimates:
+
+```{r, echo = FALSE, out.width = '32%', fig.show='hold'}
+hist(sapply(is.100,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(is.1000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(is.10000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+```
+
+- Histograms of **Rejection Sampling** estimates:
+
+```{r, echo = FALSE, out.width = '32%', fig.show='hold'}
+hist(sapply(rs.100,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(rs.1000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(rs.10000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+```
+
+- Histograms of **Importance Sampling Resampling** estimates:
+
+```{r, echo = FALSE, out.width = '32%', fig.show='hold'}
+hist(sapply(sir.100,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(sir.1000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(sir.10000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+```
+
+- Histograms of **Philippe Robert** estimates:
+
+```{r, echo = FALSE, out.width = '32%', fig.show='hold'}
+hist(sapply(pr.100,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(pr.1000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+hist(sapply(pr.10000,c),freq=FALSE, xlab=expression(sigma^2), main = "", breaks = 14)
+```
+
+Below the table summarizes the average estimates as well as the standard deviation of those estimates for the four methods across the three different sample sizes:
+
+
+```{r, echo = FALSE}
+mean.is.100 <- mean(sapply(is.100,c))
+mean.is.1000 <- mean(sapply(is.1000,c))
+mean.is.10000 <- mean(sapply(is.10000,c))
+mean.rs.100 <- mean(sapply(rs.100,c))
+mean.rs.1000 <- mean(sapply(rs.1000,c))
+mean.rs.10000 <- mean(sapply(rs.10000,c))
+mean.sir.100 <- mean(sapply(sir.100,c))
+mean.sir.1000 <- mean(sapply(sir.1000,c))
+mean.sir.10000 <- mean(sapply(sir.10000,c))
+mean.pr.100 <- mean(sapply(pr.100,c))
+mean.pr.1000 <- mean(sapply(pr.1000,c))
+mean.pr.10000 <- mean(sapply(pr.10000,c))
+
+sd.is.100 <- sd(sapply(is.100,c))
+sd.is.1000 <- sd(sapply(is.1000,c))
+sd.is.10000 <- sd(sapply(is.10000,c))
+sd.rs.100 <- sd(sapply(rs.100,c))
+sd.rs.1000 <- sd(sapply(rs.1000,c))
+sd.rs.10000 <- sd(sapply(rs.10000,c))
+sd.sir.100 <- sd(sapply(sir.100,c))
+sd.sir.1000 <- sd(sapply(sir.1000,c))
+sd.sir.10000 <- sd(sapply(sir.10000,c))
+sd.pr.100 <- sd(sapply(pr.100,c))
+sd.pr.1000 <- sd(sapply(pr.1000,c))
+sd.pr.10000 <- sd(sapply(pr.10000,c))
+
+
+rbind(c(round(mean.is.100,3), round(sd.is.100,3), round(mean.is.1000,3), round(sd.is.1000,3), round(mean.is.10000,3), round(sd.is.10000,3)),
+      c(round(mean.rs.100,3), round(sd.rs.100,3), round(mean.rs.1000,3), round(sd.rs.1000,3), round(mean.rs.10000,3), round(sd.rs.10000,3)),
+      c(round(mean.sir.100,3), round(sd.sir.100,3), round(mean.sir.1000,3), round(sd.sir.1000,3), round(mean.sir.10000,3), round(sd.sir.10000,3)),
+      c(round(mean.pr.100,3), round(sd.pr.100,3), round(mean.pr.1000,3), round(sd.pr.1000,3), round(mean.pr.10000,3), round(sd.pr.10000,3))) %>%
+data.frame() %>%
+`rownames<-`(c("importance sampling", 
+                 "rejection sampling", 
+                 "sampling importance resampling",
+                 "Philippe and Rober")) %>%
+kable(col.names = c("Mean(n=100)", "SD(n=100)", "Mean(n=1k)", "SD(n=1k)", "Mean(n=10k)", "SD(n=10k)"),
+        caption = "Performance of the parameters estimation")
+
+```
