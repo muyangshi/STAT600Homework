@@ -1,0 +1,25 @@
+---
+title: "HW5MuyangShi"
+author: "Muyang Shi"
+date: "2024-03-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', out.width = '60%')
+library(Rcpp)
+library(RcppArmadillo)
+library(dplyr)
+library(knitr)
+library(gridExtra)
+library(latex2exp)
+library(ggplot2)
+library(foreach)
+library(doParallel)
+numcores <- detectCores()
+registerDoParallel(numcores - 2)
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+sourceCpp('MCMC.cpp')
+```
+
+Note: the cpp source code to this document can be found on my Github, listed as `MCMC.cpp`, [\textcolor{blue}{here}](https://github.com/muyangshi/STAT600Homework/tree/main/HW5).
