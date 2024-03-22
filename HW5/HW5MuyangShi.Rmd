@@ -16,6 +16,7 @@ library(latex2exp)
 library(ggplot2)
 library(foreach)
 library(doParallel)
+library(coda)
 numcores <- detectCores()
 registerDoParallel(numcores - 2)
 setwd(dirname(rstudioapi::getSourceEditorContext()$path))
@@ -23,3 +24,262 @@ sourceCpp('MCMC.cpp')
 ```
 
 Note: the cpp source code to this document can be found on my Github, listed as `MCMC.cpp`, [\textcolor{blue}{here}](https://github.com/muyangshi/STAT600Homework/tree/main/HW5).
+
+## Problem
+
+Assume the model
+\begin{equation*}
+X_j \sim 
+  \begin{cases}
+  \text{Poisson}(\lambda_1), & j = 1, ..., \theta \\
+  \text{Poisson}(\lambda_2), & j = \theta+1, ..., 112
+  \end{cases}
+\end{equation*}
+Assume $\lambda_i | \alpha \sim \text{Gamma}(3, \alpha)$ for $i = 1, 2$ where $\alpha \sim \text{Gamma(10, 10)}$ and assume $\theta$ follows a discrete uniform distribution over $\{1, ..., 111\}$. We would like to estimate the posterior distribution of the model parameters via a Gibbs sampler.
+
+### (a) Derive the conditional distributions necessary to carry out Gibbs sampling for the change-point model.
+
+The joint likelihood is:
+\begin{align*}
+p(\boldsymbol{\Theta} | \boldsymbol{X}) &\propto p(\boldsymbol{X} | \boldsymbol{\Theta})p(\boldsymbol{\Theta}) \\
+&= p(\boldsymbol{X} | \lambda_1, \lambda_2, \theta) \cdot p(\lambda_1 | \alpha) p(\lambda_2 | \alpha) \cdot p(\alpha) p(\theta) \\
+&= \prod_{j = 1}^{j = \theta} \dfrac{\lambda_1^{X_j}e^{-\lambda_1}}{X_j!} 
+\prod_{j = \theta+1}^{j = 112} \dfrac{\lambda_2^{X_j}e^{-\lambda_2}}{X_j!} \cdot
+\dfrac{\alpha^3}{\Gamma(3)}\lambda_1^{3-1}e^{-\alpha \lambda_1}
+\dfrac{\alpha^3}{\Gamma(3)}\lambda_2^{3-1}e^{-\alpha \lambda_2} \cdot
+\dfrac{10^{10}}{\Gamma(10)}\alpha^{10-1}e^{-10 \alpha}
+\dfrac{1}{111} \mathbf{1}(\theta \in \{1, ..., 111\})
+\end{align*}
+
+And the full conditionals are:
+
+For $\lambda_1$:
+\begin{align*}
+p(\lambda_1 | \boldsymbol{X}, \lambda_2, \alpha, \theta) & \propto p(\boldsymbol{X} | \lambda_1, \lambda_2, \alpha, \theta) p(\lambda_1 | \alpha) \\
+&\propto \prod_{j=1}^{j=\theta} \dfrac{\lambda_1^{X_j}e^{-\lambda_1}}{X_j!} \lambda_1^{3-1}e^{-\alpha \lambda_1} \\
+&\propto \lambda_1^{\sum_{j=1}^\theta X_j + 3 - 1}e^{-(\theta+\alpha)\lambda_1} \\
+&\sim \text{Gamma}(3 + \sum_{j=1}^\theta X_j, \theta+\alpha)
+\end{align*}
+Similarly, for $\lambda_2$:
+\begin{align*}
+p(\lambda_2 | \boldsymbol{X}, \lambda_1, \alpha, \theta) &\propto \lambda_2^{\sum_{j=\theta+1}^{112} X_j + 3 - 1}e^{-(112 - \theta + \alpha) \lambda_2} \\
+&\sim \text{Gamma}(3 + \sum_{j=\theta+1}^{112} X_j, 112 - \theta+\alpha)
+\end{align*}
+And for $\alpha$:
+\begin{align*}
+p(\alpha | \boldsymbol{X}, \lambda_1, \lambda_2, \theta) &\propto \alpha^3 e^{-\alpha \lambda_1} \alpha^3 e^{-\alpha \lambda_2} \alpha^{10-1} e^{-10\alpha} \\
+&= \alpha^{16-1} e^{-(10 + \lambda_1 + \lambda_2) \alpha} \\
+&\sim \text{Gamma}(16, 10 + \lambda_1 + \lambda_2)
+\end{align*}
+Finally for $\theta$:
+\begin{align*}
+p(\theta | \boldsymbol{X}, \lambda_1, \lambda_2, \alpha) &\propto \prod_{j = 1}^{j = \theta} \dfrac{\lambda_1^{X_j}e^{-\lambda_1}}{X_j!} 
+\prod_{j = \theta+1}^{j = 112} \dfrac{\lambda_2^{X_j}e^{-\lambda_2}}{X_j!} \mathbf{1}(\theta \in \{1, ..., 111\}) \\
+&\propto \lambda_1^{\sum_{j=1}^\theta X_j}e^{-\theta \lambda_1} \lambda_2^{\sum_{j=\theta+1}^{112} X_j}e^{-(112-\theta)\lambda_2}\mathbf{1}(\theta \in \{1, ..., 111\})
+\end{align*}
+Note that we can't see the distribution of $\theta$ through just eyeballing the equation. We'd be using a Metropolis approach -- 1.) proposing $\theta$ from the discrete Uniform between 1 and 111, 2.) calculate the likelihood (equation above) ratio to decide whether we accept or reject. (Also note that this proposal is symmetric, so there's no "Hasting" ratio.)
+
+### (b) Implement the Gibbs sampler. Use a suite of convergence diagnostics to evaluate the convergence and mixing of your sampler.
+
+The Gibbs sampler is implemented in `RcppArmadillo` with the function name `MCMC`. We ran four chains (for the Gelman diagnostic), and for inference we will use the first chain.
+
+Note that, as we plot below, where 
+
+- the traceplot looks fine in that the chain seems to have converged and the mixing is good, 
+- the autocorrelation plot also seems fine in that we have decent effective sample size; $\theta$ is discrete so the traceplot for it actually doesn't look that bad
+- and the Gelman diagnostic R is very close to 1 which is good (indicate that the chains have converged).
+
+```{r}
+coal <- read.table('coal.dat', skip = 1) # load data
+
+# initial values
+theta_0 <- 50
+alpha_0 <- 1.1
+lambda1_0 <- mean(coal[1:theta_0,2])
+lambda2_0 <- mean(coal[theta_0:nrow(coal),2])
+
+# run a couple chains using Rcpp
+set.seed(2345)
+chain1 <- MCMC(5000, coal$V2, lambda1_0, lambda2_0, alpha_0, theta_0)
+chain2 <- MCMC(5000, coal$V2, lambda1_0, lambda2_0, alpha_0, theta_0)
+chain3 <- MCMC(5000, coal$V2, lambda1_0, lambda2_0, alpha_0, theta_0)
+chain4 <- MCMC(5000, coal$V2, lambda1_0, lambda2_0, alpha_0, theta_0)
+```
+
+```{r, echo = FALSE}
+colnames(chain1) <- c('lambda1', 'lambda2', 'alpha', 'theta')
+colnames(chain2) <- c('lambda1', 'lambda2', 'alpha', 'theta')
+colnames(chain3) <- c('lambda1', 'lambda2', 'alpha', 'theta')
+colnames(chain4) <- c('lambda1', 'lambda2', 'alpha', 'theta')
+chain1.mcmc <- mcmc(chain1)
+chain2.mcmc <- mcmc(chain2)
+chain3.mcmc <- mcmc(chain3)
+chain4.mcmc <- mcmc(chain4)
+
+mcmc_list <- mcmc.list(list(chain1.mcmc, chain2.mcmc, chain3.mcmc, chain4.mcmc))
+```
+
+```{r}
+plot(chain1.mcmc, density = FALSE)
+
+autocorr.plot(chain1.mcmc)
+
+gelman.diag(mcmc_list)
+```
+
+### (c) Construct density histograms and a table of summary statistics for the approximate posterior distributions of $\theta, \lambda_1$, and $\lambda_2$. Are symmetric HPD intervals appropriate for all of these parameters?
+
+Here is the density histograms for the four parameters, $\lambda_1, \lambda_2, \alpha$ and $\theta$:
+
+```{r, echo = FALSE}
+plot(chain1.mcmc, trace = FALSE)
+```
+
+Here is a table of summary statistics for the approximate posterior distributions of $\theta, \lambda_1, \lambda_2$:
+
+```{r, echo = FALSE}
+summary(chain1.mcmc)
+```
+
+The skewness in the distributions aren't "severe" -- hence using symmetric HPD intervals are fine; however, one might argue that the distributions for $\lambda_1$, $\lambda_2$, as well as for $\theta$ are slightly right skewed, hence it might be better to use equal-tail intervals.
+
+### (d) Interpret the results in the context of the problem.
+
+Based on the posterior distributions from the MCMC, we believe there is a 95% probability that:
+
+- $\lambda_1$, average number of yearly coal-mining disasters during the first period, is anywhere between 2.59 to 3.73
+- $\lambda_2$, average number of yearly coal-mining disasters during the second period, is anywhere between 0.74 to 1.20
+- $\theta$ is anywhere between 36 to 43, i.e. the transition happened anywhere between the year of 1886 to 1893.
+
+### (e) Change the prior for $\lambda_1$ and $\lambda_2$ to a half-normal distribution $\propto N(0, \sigma^2)1_{[\lambda > 0]}$ with $\sigma^2$ known. Derive the appropriate algorithm (MH or Gibbs) to carry out inference on the posterior distribution of $\lambda_1$ and $\lambda_2$.
+
+We begin with the joint likelihood:
+\begin{align*}
+p(\boldsymbol{\Theta} | \boldsymbol{X}) &\propto p(\boldsymbol{X} | \boldsymbol{\Theta})p(\boldsymbol{\Theta}) \\
+&= p(\boldsymbol{X} | \lambda_1, \lambda_2, \theta) \cdot p(\lambda_1 | \sigma^2) p(\lambda_2 | \sigma^2) \cdot p(\theta) \\
+&= \prod_{j = 1}^{j = \theta} \dfrac{\lambda_1^{X_j}e^{-\lambda_1}}{X_j!} 
+\prod_{j = \theta+1}^{j = 112} \dfrac{\lambda_2^{X_j}e^{-\lambda_2}}{X_j!} \cdot
+\dfrac{\sqrt{2}}{\sigma \sqrt{\pi}} \exp(-\dfrac{\lambda_1^2}{2\sigma^2})
+\dfrac{\sqrt{2}}{\sigma \sqrt{\pi}} \exp(-\dfrac{\lambda_2^2}{2\sigma^2}) \cdot
+\dfrac{1}{111} \mathbf{1}(\theta \in \{1, ..., 111\}) \\
+&\propto \prod_{j = 1}^{j = \theta} \lambda_1^{X_j}e^{-\lambda_1}
+\prod_{j = \theta+1}^{j = 112} \lambda_2^{X_j}e^{-\lambda_2} \cdot
+\dfrac{1}{\sigma^2} \exp(-\dfrac{\lambda_1^2}{2\sigma^2}) \exp(-\dfrac{\lambda_2^2}{2\sigma^2}) \cdot
+\mathbf{1}(\theta \in \{1, ..., 111\})
+\end{align*}
+
+And the full conditionals,
+
+For $\lambda_1$:
+\begin{align*}
+p(\lambda_1 | \boldsymbol{X}, \lambda_2, \sigma, \theta) \propto \lambda_1^{\sum_{j=1}^\theta X_j} \exp(-\theta \lambda_1 - \dfrac{\lambda_1^2}{2\sigma^2})
+\end{align*}
+
+For $\lambda_2$:
+\begin{align*}
+p(\lambda_2 | \boldsymbol{X}, \lambda_1, \sigma, \theta) \propto \lambda_1^{\sum_{j=\theta+1}^{112} X_j} \exp(-(112-\theta) \lambda_1 - \dfrac{\lambda_2^2}{2\sigma^2})
+\end{align*}
+
+And for $\theta$:
+\begin{align*}
+p(\theta | \boldsymbol{X}, \lambda_1, \lambda_2, \sigma) 
+&\propto \lambda_1^{\sum_{j=1}^\theta X_j}e^{-\theta \lambda_1} \lambda_2^{\sum_{j=\theta+1}^{112} X_j}e^{-(112-\theta)\lambda_2}\mathbf{1}(\theta \in \{1, ..., 111\})
+\end{align*}
+
+We will be using **random-walk metropolis** to update the parameters $\lambda_1$ and $\lambda_2$ (i.e. immediately reject if $\lambda_1$ and $\lambda_2$ falls out of support, so by doing it this way the hasting ratio will be 1).
+
+### (f) Implement your MCMC algorithm from part (e). Try several values of $\sigma^2$ based on your understanding of the problem. (What is a reasonable variance for $\lambda$ based on what you know about the problem?).
+
+The MH sampler is implemented in `RcppArmadillo` with the function name `MCMC_halfnorm`. We ran four chains (for the Gelman diagnostic) across three values of $\sigma \in \{0.5, 1.5, 2.5\}$, and for inference we will use the first chain for each $\sigma$.
+
+```{r}
+sigmas <- c(0.5,1.5,2.5)
+set.seed(2345)
+
+chain1.1 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[1], theta_0)
+chain1.2 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[1], theta_0)
+chain1.3 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[1], theta_0)
+chain1.4 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[1], theta_0)
+
+chain2.1 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[2], theta_0)
+chain2.2 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[2], theta_0)
+chain2.3 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[2], theta_0)
+chain2.4 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[2], theta_0)
+
+chain3.1 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[3], theta_0)
+chain3.2 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[3], theta_0)
+chain3.3 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[3], theta_0)
+chain3.4 <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, sigmas[3], theta_0)
+```
+
+```{r, echo = FALSE}
+colnames(chain1.1) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain1.2) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain1.3) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain1.4) <- c('lambda1', 'lambda2',  'theta')
+chain1.1.mcmc <- mcmc(chain1.1)
+chain1.2.mcmc <- mcmc(chain1.2)
+chain1.3.mcmc <- mcmc(chain1.3)
+chain1.4.mcmc <- mcmc(chain1.4)
+
+colnames(chain2.1) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain2.2) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain2.3) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain2.4) <- c('lambda1', 'lambda2',  'theta')
+chain2.1.mcmc <- mcmc(chain2.1)
+chain2.2.mcmc <- mcmc(chain2.2)
+chain2.3.mcmc <- mcmc(chain2.3)
+chain2.4.mcmc <- mcmc(chain2.4)
+
+colnames(chain3.1) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain3.2) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain3.3) <- c('lambda1', 'lambda2',  'theta')
+colnames(chain3.4) <- c('lambda1', 'lambda2',  'theta')
+chain3.1.mcmc <- mcmc(chain3.1)
+chain3.2.mcmc <- mcmc(chain3.2)
+chain3.3.mcmc <- mcmc(chain3.3)
+chain3.4.mcmc <- mcmc(chain3.4)
+
+mcmc_list.1 <- mcmc.list(list(chain1.1.mcmc, chain1.2.mcmc, chain1.3.mcmc, chain1.4.mcmc))
+mcmc_list.2 <- mcmc.list(list(chain2.1.mcmc, chain2.2.mcmc, chain2.3.mcmc, chain2.4.mcmc))
+mcmc_list.3 <- mcmc.list(list(chain3.1.mcmc, chain3.2.mcmc, chain3.3.mcmc, chain3.4.mcmc))
+```
+
+We looked at the traceplot, autocorrelation plots, and the Gelman potential scale reduction factors, and decide that the model with $\sigma = 1.5$ yields the best result. Below are the traceplots, density plots, autocorrelation plots, and the Gelman PSRF for the model with $\sigma = 1.5$:
+
+```{r, echo = FALSE, out.width='75%'}
+# plot(chain1.1.mcmc, density = FALSE)
+# autocorr.plot(chain1.1.mcmc)
+# gelman.diag(mcmc_list.1)
+
+plot(chain2.1.mcmc, density = TRUE)
+autocorr.plot(chain2.1.mcmc)
+gelman.diag(mcmc_list.2)
+
+# plot(chain3.1.mcmc, density = FALSE)
+# autocorr.plot(chain3.1.mcmc)
+# gelman.diag(mcmc_list.3)
+```
+
+### (g) Provide a few key results to compare the inferences that you'd make based on the two models. Which model do you prefer and why?
+
+Here is a summary of posterior for the halfnorm model with $\sigma = 1.5$:
+```{r, echo = FALSE}
+summary(chain2.1.mcmc)
+```
+Based on the posterior distributions from the MCMC, we believe there is a 95% probability that:
+
+- $\lambda_1$, average number of yearly coal-mining disasters during the first period, is anywhere between 2.60 to 3.63
+- $\lambda_2$, average number of yearly coal-mining disasters during the second period, is anywhere between 0.72 to 1.16
+- $\theta$ is anywhere between 36 to 46, i.e. the transition happened anywhere between the year of 1886 to 1896.
+
+Note that qualitatively, the results is similar to the Gamma-Poisson model -- estimates for $\lambda_1$ being larger than $\lambda_2$ suggests that the reduction in yearly coal-mining disasters; the estimates for $\theta$ (change point) also being similar between the two models.
+
+However, I would prefer the Gamma-Poisson model, because:
+
+- Gibbs sampling does not involve the Metropolis-Hasting step, so mixing would not be an issue as we have the closed form posterior.
+
+- Due to not having the Metropolis-Hasting update, the Gibbs sampler is also marginally faster than the MH.
+
+### (h) Run both models in `Nimble`. Compare the results and speed from your code and Nimble's. Briefly discuss.
+
