@@ -17,6 +17,7 @@ library(ggplot2)
 library(foreach)
 library(doParallel)
 library(coda)
+library(nimble)
 numcores <- detectCores()
 registerDoParallel(numcores - 2)
 setwd(dirname(rstudioapi::getSourceEditorContext()$path))
@@ -283,3 +284,89 @@ However, I would prefer the Gamma-Poisson model, because:
 
 ### (h) Run both models in `Nimble`. Compare the results and speed from your code and Nimble's. Briefly discuss.
 
+Below we implement the model in `nimble`. Note that `nimble` by default treats all variables as continuous, so we use the step function for $\theta$ to make it discrete uniform in $\{1, ..., 111\}$ when deciding between $\lambda_1$ and $\lambda_2$ for the Poisson, and for the traceplot we use the `floor` function on $\theta$.
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+coalCode <- nimbleCode({
+  alpha ~ dgamma(10, 10)
+  lambda1 ~ dgamma(3, alpha)
+  lambda2 ~ dgamma(3, alpha)
+  theta ~ dunif(1, 112)
+  
+  for (i in 1:112){
+    X[i] ~ dpois(lambda1 * step(theta - i) + lambda2 * (1-step(theta-i)))
+  }
+})
+coalData <- list(X = coal[,2])
+coalInits <- list(alpha = 1.1,
+                  theta = 50,
+                  lambda1 = 2.7,
+                  lambda2 = 0.89)
+coalModel <- nimbleModel(coalCode, 
+                      data = coalData, 
+                      inits = coalInits) # pump
+CcoalModel <- compileNimble(coalModel)
+coalConf <- configureMCMC(coalModel)
+coalConf$addMonitors(c("lambda1","lambda2","alpha","theta"))
+coalMCMC <- buildMCMC(coalConf)
+CcoalMCMC <- compileNimble(coalMCMC, project = coalModel)
+coalSamples.1 <- runMCMC(CcoalMCMC, niter = 5000)
+coalSamples.2 <- runMCMC(CcoalMCMC, niter = 5000)
+coalSamples.3 <- runMCMC(CcoalMCMC, niter = 5000)
+coalSamples.4 <- runMCMC(CcoalMCMC, niter = 5000)
+```
+
+Below are traceplots, density plots, auto-correlation plots, and Gelman diagnostics for the chain run by `nimble` -- the chains have converged.
+
+```{r, echo = FALSE}
+coalSamples.1[,4] <- floor(coalSamples.1[,4])
+coalSamples.2[,4] <- floor(coalSamples.2[,4])
+coalSamples.3[,4] <- floor(coalSamples.3[,4])
+coalSamples.4[,4] <- floor(coalSamples.4[,4])
+
+chain1.nimble <- mcmc(coalSamples.1)
+chain2.nimble <- mcmc(coalSamples.2)
+chain3.nimble <- mcmc(coalSamples.3)
+chain4.nimble <- mcmc(coalSamples.4)
+
+mcmc_list.nimble <- mcmc.list(list(chain1.nimble, chain2.nimble,chain3.nimble,chain4.nimble))
+
+plot(chain1.nimble, density = FALSE)
+plot(chain1.nimble, trace = FALSE)
+autocorr.plot(chain1.nimble)
+gelman.diag(mcmc_list.nimble)
+```
+
+Based on the summary of the posterior distributions from the `nimble` MCMC below, we believe there is a 95% probability that:
+
+- $\lambda_1$, average number of yearly coal-mining disasters during the first period, is anywhere between 2.55 to 3.69
+- $\lambda_2$, average number of yearly coal-mining disasters during the second period, is anywhere between 0.73 to 1.18
+- $\theta$ is anywhere between 36 to 46, i.e. the transition happened anywhere between the year of 1886 to 1896.
+
+Note that again qualitatively, the results is very similar to the models we implemented by ourselves -- estimates for $\lambda_1$ being larger than $\lambda_2$ suggests that the reduction in yearly coal-mining disasters; the estimates for $\theta$ (change point) also being similar between the two models:
+
+```{r, echo = FALSE}
+summary(chain1.nimble)
+```
+
+Speed-wise, note that **our models** are of 2 orders of magnitude faster than the `nimble` model.
+
+```{r, message=FALSE, warning=FALSE}
+start.time <- Sys.time()
+a <- runMCMC(CcoalMCMC, niter = 5000, progressBar = FALSE)
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+start.time <- Sys.time()
+b <- MCMC(5000, coal$V2, lambda1_0, lambda2_0, alpha_0, theta_0)
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+start.time <- Sys.time()
+c <- MCMC_halfnorm(5000, coal$V2, lambda1_0, lambda2_0, 1.5, theta_0)
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
